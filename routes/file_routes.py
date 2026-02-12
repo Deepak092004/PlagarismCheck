@@ -50,8 +50,6 @@ def upload_file():
     if not allowed_file(file.filename):
         return jsonify({"error": "File type not allowed"}), 400
 
-    if request.content_length and request.content_length > MAX_FILE_SIZE:
-        return jsonify({"error": "File too large (Max 10MB)"}), 400
 
     filename = secure_filename(file.filename)
     os.makedirs(UPLOAD_FOLDER, exist_ok=True)
@@ -87,6 +85,8 @@ def upload_file():
 def check_plagiarism():
     file1 = request.files.get("file1")
     file2 = request.files.get("file2")
+    user_id = get_jwt_identity()
+    
 
     if not file1 or not file2:
         return jsonify({"error": "Both files are required"}), 400
@@ -118,6 +118,8 @@ def check_plagiarism():
 
     
     result = Result(
+        user_id=user_id, 
+        
         file1_name=file1.filename,
         file2_name=file2.filename,
         plagiarism_score=percentage_score,
@@ -153,7 +155,10 @@ def get_user_results():
 
     # If later you add user_id to Result model,
     # you can filter by user_id. For now we fetch all.
-    results = Result.query.order_by(Result.created_at.desc()).all()
+    results = Result.query.filter_by(user_id=user_id)\
+                      .order_by(Result.created_at.desc())\
+                      .all()
+
 
     response = []
 
@@ -175,6 +180,35 @@ def get_user_results():
 
     return jsonify(response), 200
 
+# ==========================================
+# GET SINGLE RESULT
+# ==========================================
+@file_bp.route("/results/<int:result_id>", methods=["GET"])
+@jwt_required()
+def get_single_result(result_id):
+    user_id = get_jwt_identity()
+
+    result = Result.query.filter_by(
+        id=result_id,
+        user_id=user_id
+    ).first()
+
+    if not result:
+        return jsonify({"error": "Result not found"}), 404
+
+    return jsonify({
+        "result_id": result.id,
+        "file1_name": result.file1_name,
+        "file2_name": result.file2_name,
+        "plagiarism_score": float(result.plagiarism_score),
+        "tfidf_score": float(result.tfidf_score),
+        "jaccard_score": float(result.jaccard_score),
+        "sequence_score": float(result.sequence_score),
+        "level": result.level,
+        "created_at": result.created_at.strftime("%Y-%m-%d %H:%M:%S")
+    }), 200
+
+
 
 # ==========================================
 # GET ANALYTICS SUMMARY
@@ -184,7 +218,7 @@ def get_user_results():
 def get_analytics():
     user_id = get_jwt_identity()
 
-    results = Result.query.all()
+    results = Result.query.filter_by(user_id=user_id).all()
 
     if not results:
         return jsonify({
@@ -219,18 +253,26 @@ def get_analytics():
         }
     }), 200
     
- # ==========================================
+# ==========================================
 # GENERATE PDF REPORT
 # ==========================================
 @file_bp.route("/report/<int:result_id>", methods=["GET"])
 @jwt_required()
 def generate_report(result_id):
-    result = Result.query.get(result_id)
+    user_id = get_jwt_identity()
+
+    result = Result.query.filter_by(
+        id=result_id,
+        user_id=user_id
+    ).first()
 
     if not result:
-        return jsonify({"error": "Result not found"}), 404
+        return jsonify({"error": "Report not found"}), 404
+    REPORT_FOLDER = "reports"
+    os.makedirs(REPORT_FOLDER, exist_ok=True)
 
-    file_path = f"report_{result_id}.pdf"
+    file_path = os.path.join(REPORT_FOLDER, f"report_{result_id}.pdf")
+
     doc = SimpleDocTemplate(file_path, pagesize=A4)
 
     elements = []
@@ -255,5 +297,3 @@ def generate_report(result_id):
     doc.build(elements)
 
     return send_file(file_path, as_attachment=True)
-
-

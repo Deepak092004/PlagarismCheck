@@ -4,10 +4,20 @@ from extensions import db, jwt, bcrypt, cors
 from routes.auth_routes import auth_bp
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from routes.file_routes import file_bp
+from werkzeug.exceptions import RequestEntityTooLarge
+
+
+
 
 
 app = Flask(__name__)
 app.config.from_object(Config)
+app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024  # 10MB
+
+@app.errorhandler(RequestEntityTooLarge)
+def handle_file_too_large(e):
+    return jsonify({"error": "File too large (Max 10MB)"}), 413
+
 
 # Initialize extensions
 db.init_app(app)
