@@ -3,6 +3,8 @@ from config import Config
 from extensions import db, jwt, bcrypt, cors
 from routes.auth_routes import auth_bp
 from flask_jwt_extended import jwt_required, get_jwt_identity
+from routes.file_routes import file_bp
+
 
 app = Flask(__name__)
 app.config.from_object(Config)
@@ -15,7 +17,9 @@ cors.init_app(app)
 
 # Register blueprints
 app.register_blueprint(auth_bp, url_prefix="/api/auth")
+app.register_blueprint(file_bp, url_prefix="/api/files")
 print(app.url_map)
+
 
 
 @app.route("/api/protected", methods=["GET"])
