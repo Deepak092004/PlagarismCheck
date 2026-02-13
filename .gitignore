@@ -3,3 +3,4 @@ vnevn/
 __pycache__/
 *.pyc
 *.pyo
+reports/

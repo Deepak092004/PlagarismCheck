@@ -22,10 +22,27 @@ class PlagiarismEngine:
 
     @staticmethod
     def tfidf_similarity(text1, text2):
-        vectorizer = TfidfVectorizer()
-        tfidf = vectorizer.fit_transform([text1, text2])
-        score = cosine_similarity(tfidf[0:1], tfidf[1:2])[0][0]
-        return score
+        """
+        Calculates similarity while handling 'Empty Vocabulary' errors 
+        common with web-scraped snippets.
+        """
+        # Quick check to avoid unnecessary math on empty data
+        if not text1.strip() or not text2.strip():
+            return 0.0
+            
+        try:
+            vectorizer = TfidfVectorizer()
+            tfidf = vectorizer.fit_transform([text1, text2])
+            
+            # This is your logic - it's correct for scikit-learn!
+            score = cosine_similarity(tfidf[0:1], tfidf[1:2])[0][0]
+            return float(score)
+        except ValueError:
+            # Triggered if text only contains stop-words or symbols
+            return 0.0
+        except Exception as e:
+            print(f"🚩 Similarity Engine Error: {e}")
+            return 0.0
 
     @staticmethod
     def jaccard_similarity(text1, text2):
