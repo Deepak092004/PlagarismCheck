@@ -1,113 +1,183 @@
 import requests
+import re
 from bs4 import BeautifulSoup
-from config import Config
+from sentence_transformers import SentenceTransformer
 from utils.plagiarism_engine import PlagiarismEngine
+from config import Config   
+
 
 class InternetDetector:
-    # Serper.dev is a direct Google Search wrapper
+
+    # ✅ LOAD API KEY FROM CONFIG
+    
+    SERPER_API_KEY = Config.SERPER_API_KEY
     SERPER_URL = "https://google.serper.dev/search"
 
-    @staticmethod
-    def extract_chunks(text, chunk_size=40):
-        """Extracts significant phrases to search on Google."""
-        words = text.split()
-        if len(words) < 15:
-            return [text]
-        
-        chunks = []
-        for i in range(0, len(words), chunk_size):
-            chunk = " ".join(words[i:i + chunk_size])
-            if len(chunk.split()) >= 10:
-                chunks.append(chunk)
-        return chunks[:5] # Limit to 5 queries per file to save credits
+    model = SentenceTransformer("all-MiniLM-L6-v2")
 
+    # Google Search using Serper
+    
     @staticmethod
-    def search_serper(query):
-        """Queries Google via Serper.dev API."""
-        headers = {
-            'X-API-KEY': Config.SERPER_API_KEY,
-            'Content-Type': 'application/json'
-        }
-        payload = {
-            "q": query,
-            "num": 5  # Fetch top 5 results for each chunk
-        }
-        
-        try:
-            response = requests.post(InternetDetector.SERPER_URL, headers=headers, json=payload, timeout=10)
-            data = response.json()
-            
-            if "organic" not in data:
-                print(f"DEBUG: No results for chunk: {query[:30]}...")
-                return []
+    def search_web(query, num_results=5):
 
-            # Return list of links and snippets
-            return [{"link": item["link"], "snippet": item.get("snippet", "")} for item in data["organic"]]
-        except Exception as e:
-            print(f"❌ Serper API Error: {e}")
+        if not InternetDetector.SERPER_API_KEY:
+            print("❌ SERPER API KEY NOT FOUND")
             return []
 
-    @staticmethod
-    def fetch_page_text(url):
-        """Attempts to scrape text from a URL."""
+        headers = {
+            "X-API-KEY": InternetDetector.SERPER_API_KEY,
+            "Content-Type": "application/json",
+        }
+
+        payload = {
+            "q": query,
+            "num": num_results
+        }
+
         try:
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
-            }
-            response = requests.get(url, headers=headers, timeout=7)
+            response = requests.post(
+                InternetDetector.SERPER_URL,
+                headers=headers,
+                json=payload,
+                timeout=10
+            )
+
+            print("🔍 Search Status Code:", response.status_code)
+
+            if response.status_code != 200:
+                print("❌ Search Failed:", response.text)
+                return []
+
+            data = response.json()
+
+            links = []
+
+            if "organic" in data:
+                for item in data["organic"]:
+                    if "link" in item:
+                        links.append(item["link"])
+
+            print("✅ Found URLs:", len(links))
+
+            return links
+
+        except Exception as e:
+            print("❌ Search error:", e)
+            return []
+
+    # Extract clean text from webpage
+    @staticmethod
+    def extract_text_from_url(url):
+        try:
+            response = requests.get(url, timeout=8)
+
             if response.status_code != 200:
                 return ""
 
             soup = BeautifulSoup(response.text, "html.parser")
-            for tag in soup(["script", "style", "nav", "footer", "header", "aside"]):
-                tag.decompose()
+
+            for script in soup(["script", "style", "noscript"]):
+                script.extract()
 
             text = soup.get_text(separator=" ")
-            return " ".join(text.split())
-        except:
+            text = re.sub(r"\s+", " ", text)
+
+            return text.lower()
+
+        except Exception:
             return ""
 
+    # Main Internet Plagiarism Detection
     @staticmethod
-    def detect_internet_plagiarism(text):
-        """Main detection engine."""
-        chunks = InternetDetector.extract_chunks(text)
+    def detect_internet_plagiarism(file_text):
+
+        if not file_text or len(file_text.strip()) < 50:
+            return {
+                "overall_score": 0,
+                "matches": [],
+                "total_sources_checked": 0,
+                "total_matched_sources": 0
+            }
+
         matches = []
-        checked_urls = set()
+        checked_sources = 0
 
-        print(f"--- 🌐 Starting Serper Web Scan ({len(chunks)} chunks) ---")
+        chunks = PlagiarismEngine.split_into_chunks(file_text)
 
-        for chunk in chunks:
-            search_results = InternetDetector.search_serper(chunk)
+        print(f"\n Starting Web Scan ({len(chunks)} chunks)")
 
-            for result in search_results:
-                url = result["link"]
-                snippet = result["snippet"]
+        # Limit chunks for speed (can increase later)
+        
+        for chunk in chunks[:3]:
 
-                if url in checked_urls:
+            search_query = chunk[:200]
+
+            urls = InternetDetector.search_web(search_query)
+
+            if not urls:
+                print("⚠ No URLs returned from search")
+
+            for url in urls:
+                print("🔎 Checking:", url)
+
+                page_text = InternetDetector.extract_text_from_url(url)
+                checked_sources += 1
+
+                if not page_text or len(page_text) < 200:
                     continue
-                checked_urls.add(url)
 
-                print(f"🔎 Checking Source: {url}")
-                page_content = InternetDetector.fetch_page_text(url)
+                quick_semantic = PlagiarismEngine.semantic_similarity(
+                    chunk,
+                    page_text[:2000]
+                )
 
-                # STRATEGY: Use full page text if possible. 
-                # If site blocks us, use the Snippet Google already provided!
-                source_text = page_content if page_content else snippet
-                
-                if not source_text:
+                print("Quick semantic score:", quick_semantic)
+
+                if quick_semantic < 35:
                     continue
 
-                score = PlagiarismEngine.tfidf_similarity(text, source_text)
-                percentage = round(score * 100, 2)
-                
-                is_snippet = "(Snippet match)" if not page_content else ""
-                print(f"📊 Similarity: {percentage}% {is_snippet}")
+                file_sentences = PlagiarismEngine.split_into_sentences(chunk)
+                page_sentences = PlagiarismEngine.split_into_sentences(page_text)
 
-                if percentage > 0.1: # Catch even small matches
-                    matches.append({
-                        "url": url,
-                        "similarity_score": percentage,
-                        "source_type": "Web Page" if page_content else "Web Snippet"
-                    })
+                for fs in file_sentences:
+                    best_score = 0
+                    best_match = ""
 
-        return sorted(matches, key=lambda x: x["similarity_score"], reverse=True)
+                    for ps in page_sentences[:100]:
+                        ngram_score = PlagiarismEngine.ngram_similarity(fs, ps)
+
+                        if ngram_score < 0.05:
+                            continue
+
+                        semantic_score = PlagiarismEngine.semantic_similarity(fs, ps)
+
+                        combined = (ngram_score * 100 * 0.4) + (semantic_score * 0.6)
+
+                        if combined > best_score:
+                            best_score = combined
+                            best_match = ps
+
+                    if best_score >= 60:
+                        matches.append({
+                            "source": url,
+                            "file_text": fs,
+                            "matched_text": best_match,
+                            "score": round(best_score, 2)
+                        })
+
+        if matches:
+            overall_score = round(
+                sum(m["score"] for m in matches) / len(matches),
+                2
+            )
+        else:
+            overall_score = 0
+
+        print("\n Final Internet Plagiarism:", overall_score, "%")
+
+        return {
+            "overall_score": overall_score,
+            "matches": matches,
+            "total_sources_checked": checked_sources,
+            "total_matched_sources": len(set(m["source"] for m in matches))
+        }

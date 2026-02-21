@@ -6,6 +6,8 @@ from datetime import datetime
 from flask import Blueprint, request, jsonify, send_file
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from werkzeug.utils import secure_filename
+from models.user_model import User
+
 
 # ReportLab components for PDF generation
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, ListFlowable, ListItem
@@ -13,6 +15,8 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 from reportlab.lib.units import inch
 from reportlab.lib.pagesizes import A4
+from reportlab.lib.units import inch, mm
+
 
 # Project specific imports
 from extensions import db
@@ -43,9 +47,9 @@ def allowed_file(filename):
     return ext in ALLOWED_EXTENSIONS
 
 
-# ==========================================
+
 # FILE UPLOAD ROUTE
-# ==========================================
+
 @file_bp.route("/upload", methods=["POST"])
 @jwt_required()
 def upload_file():
@@ -89,9 +93,9 @@ def upload_file():
     }), 201
 
 
-# ==========================================
+
 # PLAGIARISM CHECK ROUTE
-# ==========================================
+
 @file_bp.route("/check", methods=["POST"])
 @jwt_required()
 def check_plagiarism():
@@ -158,88 +162,107 @@ def check_plagiarism():
     }), 200
     
     
-# ==========================================
+
 # INTERNET SOURCE DETECTION
-# ==========================================
+
 @file_bp.route('/internet-check', methods=['POST'])
 @jwt_required()
 def internet_check():
+
     if 'file' not in request.files:
         return jsonify({"error": "No file part in the request"}), 400
     
     file = request.files['file']
+
     if file.filename == '':
         return jsonify({"error": "No selected file"}), 400
 
     try:
         filename = file.filename
-        # --- 2. Upgraded Text Extraction (Handles PDF and TXT) ---
+
+        # 1️ .TEXT EXTRACTION (PDF + TXT)
+        
         if filename.lower().endswith('.pdf'):
-            # Read PDF stream directly from memory
+
             pdf_stream = file.read()
             doc = fitz.open(stream=pdf_stream, filetype="pdf")
+
             content = ""
             for page in doc:
                 content += page.get_text()
+
             doc.close()
+
         else:
-            # Fallback to UTF-8 for .txt files
-            content = file.read().decode('utf-8')
-        
+            content = file.read().decode('utf-8', errors="ignore")
+
         if not content.strip():
-            return jsonify({"error": "Could not extract text or file is empty"}), 400
+            return jsonify({
+                "error": "Could not extract text or file is empty"
+            }), 400
 
-        # --- 3. Perform Internet Scan using Serper ---
-        print(f"--- 🌐 Scanning: {filename} ---")
-        matches = InternetDetector.detect_internet_plagiarism(content)
+        # 2. INTERNET SCAN
+        print(f"\n--- Internet Scanning: {filename} ---")
 
-        # --- 4. Calculate Scores ---
-        overall_score = 0
-        if matches:
-            # Get the highest similarity percentage found
-            overall_score = max(m['similarity_score'] for m in matches)
+        internet_result = InternetDetector.detect_internet_plagiarism(content)
 
-        # --- 5. Determine Plagiarism Level ---
-        level = "Unique"
-        if overall_score > 70: level = "High"
-        elif overall_score > 30: level = "Moderate"
-        elif overall_score > 0.1: level = "Low"
+        #  CORRECT KEYS
+        overall_score = internet_result.get("overall_score", 0)
+        matches = internet_result.get("matches", [])
+        total_sources_checked = internet_result.get("total_sources_checked", 0)
+        total_matched_sources = internet_result.get("total_matched_sources", 0)
 
-        # --- 6. Save to PostgreSQL (Using verified columns) ---
+        # 3️ DETERMINE LEVEL
+        if overall_score >= 70:
+            level = "High"
+        elif overall_score >= 30:
+            level = "Moderate"
+        elif overall_score > 0:
+            level = "Low"
+        else:
+            level = "Unique"
+
+        # 4️ SAVE TO DATABASE
         new_result = Result(
             user_id=get_jwt_identity(),
             file1_name=filename,
             file2_name="Web Search",
             plagiarism_score=overall_score,
-            tfidf_score=overall_score, # Placeholder for overall
-            jaccard_score=0,           # Web search usually uses cosine/tfidf
+            tfidf_score=overall_score,  # placeholder
+            jaccard_score=0,
             sequence_score=0,
             level=level,
-            internet_matches=matches,  # Saved to jsonb column
-            original_text=content,     # Saved to text column for highlighting
+            internet_matches=matches,   #  Save actual matches list
+            original_text=content,
             created_at=datetime.utcnow()
         )
 
         db.session.add(new_result)
         db.session.commit()
 
-        # --- 7. Return Response ---
+        # 5️ RETURN RESPONSE
         return jsonify({
             "message": "Internet scan completed",
             "result_id": new_result.id,
             "overall_score": overall_score,
             "level": level,
-            "matches": matches[:5]  # Sending top 5 matches to frontend
+            "matches": matches[:5],  # return top 5 matches
+            "total_sources_checked": total_sources_checked,
+            "total_matched_sources": total_matched_sources
         }), 200
 
     except Exception as e:
         db.session.rollback()
         print(f"❌ INTERNET CHECK ERROR: {str(e)}")
-        return jsonify({"error": f"Server error: {str(e)}"}), 500
+        return jsonify({
+            "error": f"Server error: {str(e)}"
+        }), 500
+
+
     
-# ==========================================
+
 # GET USER RESULT HISTORY (WITH PAGINATION)
-# ==========================================
+
 @file_bp.route("/results", methods=["GET"])
 @jwt_required()
 def get_user_results():
@@ -280,9 +303,9 @@ def get_user_results():
     }), 200
 
 
-# ==========================================
+
 # GET SINGLE RESULT
-# ==========================================
+
 @file_bp.route("/results/<int:result_id>", methods=["GET"])
 @jwt_required()
 def get_single_result(result_id):
@@ -310,9 +333,9 @@ def get_single_result(result_id):
 
 
 
-# ==========================================
+
 # GET ANALYTICS SUMMARY
-# ==========================================
+
 @file_bp.route("/analytics", methods=["GET"])
 @jwt_required()
 def get_analytics():
@@ -353,99 +376,155 @@ def get_analytics():
         }
     }), 200
     
-# ==========================================
-# GENERATE PDF REPORT
-# ==========================================
+
+# PROFESSIONAL TURNITIN-STYLE PDF REPORT
+
 @file_bp.route("/report/<int:result_id>", methods=["GET"])
 @jwt_required()
 def generate_report(result_id):
-    user_id = get_jwt_identity()
-    
-    # Fetch result from DB
-    result = Result.query.filter_by(id=result_id, user_id=user_id).first()
 
+    user_id = get_jwt_identity()
+
+    result = Result.query.filter_by(id=result_id, user_id=user_id).first()
     if not result:
         return jsonify({"error": "Report not found"}), 404
 
+    user = User.query.filter_by(id=user_id).first()
+
     try:
-        # Define Path
-        REPORT_FOLDER = "reports"
-        os.makedirs(REPORT_FOLDER, exist_ok=True)
         file_path = os.path.join(REPORT_FOLDER, f"report_{result_id}.pdf")
 
-        # Setup Document
         doc = SimpleDocTemplate(file_path, pagesize=A4)
         elements = []
         styles = getSampleStyleSheet()
 
-        # 1. Header Section
-        elements.append(Paragraph("<b>Plagiarism Detection Report</b>", styles["Title"]))
-        elements.append(Paragraph(f"Analysis Date: {datetime.now().strftime('%b %d, %Y')}", styles["Normal"]))
+        # HEADER SECTION
+        # -----------------------------------------
+        elements.append(Paragraph("<b>PLAGIARISM DETECTION REPORT</b>", styles["Title"]))
         elements.append(Spacer(1, 0.3 * inch))
 
-        # 2. Summary Section
-        summary_style = ParagraphStyle('Summary', fontSize=14, leading=16, alignment=1, textColor=colors.red)
-        score = getattr(result, 'plagiarism_score', 0)
-        elements.append(Paragraph(f"<b>OVERALL SIMILARITY: {score}%</b>", summary_style))
+        elements.append(Paragraph(f"<b>User:</b> {user.email}", styles["Normal"]))
+        elements.append(Paragraph(f"<b>File:</b> {result.file1_name}", styles["Normal"]))
+        elements.append(Paragraph(f"<b>Date:</b> {result.created_at.strftime('%Y-%m-%d %H:%M')}", styles["Normal"]))
+        elements.append(Spacer(1, 0.3 * inch))
+
+        # -----------------------------------------
+        # OVERALL SCORE SECTION
+        # -----------------------------------------
+        score = float(result.plagiarism_score)
+
+        if score >= 70:
+            score_color = colors.red
+        elif score >= 30:
+            score_color = colors.orange
+        else:
+            score_color = colors.green
+
+        score_style = ParagraphStyle(
+            'ScoreStyle',
+            fontSize=24,
+            alignment=1,
+            textColor=score_color
+        )
+
+        elements.append(Paragraph(f"<b>{score}% SIMILARITY</b>", score_style))
         elements.append(Spacer(1, 0.4 * inch))
 
-        # 3. TOP SOURCES TABLE
-        elements.append(Paragraph("<b>Top Sources Detected:</b>", styles["Heading2"]))
-        
-        # Safe access to internet_matches
-        matches = getattr(result, 'internet_matches', []) or []
-        
-        source_data = [["#", "Source URL", "Match %"]]
-        if matches:
-            for i, match in enumerate(matches[:10], 1): # Top 10 sources
-                url = match.get('url', 'N/A')
-                sim_score = match.get('similarity_score', 0)
-                # Create a clickable link in the PDF
-                url_p = Paragraph(f"<link href='{url}' color='blue'>{url[:60]}...</link>", styles["Normal"])
-                source_data.append([str(i), url_p, f"{sim_score}%"])
-        else:
-            source_data.append(["-", "No internet matches found", "0%"])
+        # -----------------------------------------
+        # PIE CHART (Original vs Plagiarized)
+        # -----------------------------------------
+        from reportlab.graphics.shapes import Drawing
+        from reportlab.graphics.charts.piecharts import Pie
 
-        table = Table(source_data, colWidths=[0.5*inch, 4.0*inch, 1.0*inch])
+        drawing = Drawing(400, 200)
+        pie = Pie()
+        pie.x = 150
+        pie.y = 15
+        pie.width = 150
+        pie.height = 150
+
+        pie.data = [score, 100 - score]
+        pie.labels = ['Plagiarized', 'Original']
+
+        pie.slices[0].fillColor = colors.red
+        pie.slices[1].fillColor = colors.green
+
+        drawing.add(pie)
+        elements.append(drawing)
+        elements.append(Spacer(1, 0.5 * inch))
+
+        # -----------------------------------------
+        # MATCHED SOURCES TABLE
+        # -----------------------------------------
+        elements.append(Paragraph("<b>Matched Sources</b>", styles["Heading2"]))
+        elements.append(Spacer(1, 0.2 * inch))
+
+        matches = result.internet_matches or []
+
+        table_data = [["#", "Source URL", "Match %"]]
+
+        for i, match in enumerate(matches[:10], 1):
+            url = match.get("source", "N/A")
+            similarity = match.get("score", 0)
+
+            link = Paragraph(
+                f"<link href='{url}' color='blue'>{url[:60]}...</link>",
+                styles["Normal"]
+            )
+
+            table_data.append([str(i), link, f"{similarity}%"])
+
+        if len(table_data) == 1:
+            table_data.append(["-", "No sources detected", "0%"])
+
+        table = Table(table_data, colWidths=[0.5*inch, 4.0*inch, 1.0*inch])
         table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
-            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
             ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
         ]))
+
         elements.append(table)
         elements.append(Spacer(1, 0.5 * inch))
 
-        # 4. HIGHLIGHTED TEXT SECTION
-        elements.append(Paragraph("<b>Detailed Analysis & Highlights:</b>", styles["Heading2"]))
-        
-        raw_text = getattr(result, 'original_text', "No text available for analysis.")
-        processed_text = html.escape(raw_text)
-        
-        # Highlight logic
-        if matches:
-            for match in matches:
-                snippet = match.get('snippet', '')
-                if snippet and len(snippet) > 20:
-                    escaped_snippet = html.escape(snippet)
-                    # Wrap the snippet in a red bold font tag
-                    highlighted = f"<font color='red'><b>{escaped_snippet}</b></font>"
-                    processed_text = processed_text.replace(escaped_snippet, highlighted)
+        # -----------------------------------------
+        # DOCUMENT ANALYSIS SECTION
+        # -----------------------------------------
+        elements.append(Paragraph("<b>Detailed Document Analysis</b>", styles["Heading2"]))
+        elements.append(Spacer(1, 0.3 * inch))
 
-        # Body text style that allows XML/HTML tags
-        body_style = ParagraphStyle('BodyText', fontSize=10, leading=14)
-        elements.append(Paragraph(processed_text, body_style))
+        original_text = result.original_text or ""
+        safe_text = html.escape(original_text)
 
-        # Build PDF
-        doc.build(elements)
-        
+        # Highlight plagiarized sentences
+        for match in matches:
+            sentence = match.get("file_text", "")
+            if sentence and len(sentence) > 20:
+                escaped = html.escape(sentence)
+                highlighted = f"<font color='red'><b>{escaped}</b></font>"
+                safe_text = safe_text.replace(escaped, highlighted)
+
+        body_style = ParagraphStyle(
+            'BodyStyle',
+            fontSize=10,
+            leading=14
+        )
+
+        elements.append(Paragraph(safe_text, body_style))
+
+        # -----------------------------------------
+        # PAGE FOOTER (Page Numbers)
+        # -----------------------------------------
+        def add_page_number(canvas, doc):
+            page_num_text = f"Page {doc.page}"
+            canvas.drawRightString(200*mm, 15*mm, page_num_text)
+
+        doc.build(elements, onLaterPages=add_page_number, onFirstPage=add_page_number)
+
         return send_file(file_path, as_attachment=True)
 
     except Exception as e:
-        print(f"❌ CRITICAL ERROR: {str(e)}")
-        return jsonify({"error": f"Internal Server Error: {str(e)}"}), 500
-
+        print("❌ REPORT ERROR:", str(e))
+        return jsonify({"error": str(e)}), 500
 
 
 @file_bp.route("/results/<int:result_id>", methods=["DELETE"])
