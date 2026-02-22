@@ -151,13 +151,13 @@ class InternetDetector:
 
                         semantic_score = PlagiarismEngine.semantic_similarity(fs, ps)
 
-                        combined = (ngram_score * 100 * 0.4) + (semantic_score * 0.6)
+                        combined = (ngram_score * 100 * 0.3) + (semantic_score * 0.7)
 
                         if combined > best_score:
                             best_score = combined
                             best_match = ps
 
-                    if best_score >= 60:
+                    if best_score >= 45:
                         matches.append({
                             "source": url,
                             "file_text": fs,
