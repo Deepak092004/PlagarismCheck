@@ -1,0 +1,8 @@
+node_modeules/
+dist/
+build/
+*.log
+*.env
+.DS_Store
+.idea/
+.vscode/
