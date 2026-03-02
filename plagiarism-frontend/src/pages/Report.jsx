@@ -154,24 +154,53 @@ export default function Report() {
           {mode === 'internet' ? (
             <label className="file-upload-label">
               <span>Upload file to check against web sources</span>
-              <input
-                type="file"
-                accept={ALLOWED_EXT.join(',')}
-                onChange={(e) => setFile1(e.target.files?.[0] || null)}
-              />
-              {file1 && <span className="file-name">{file1.name}</span>}
+              <div className="file-input-wrapper">
+                <input
+                  type="file"
+                  id="file-upload-internet"
+                  accept={ALLOWED_EXT.join(',')}
+                  onChange={(e) => setFile1(e.target.files?.[0] || null)}
+                />
+                <label htmlFor="file-upload-internet" className="file-upload-button">
+                  <FiUpload size={18} />
+                  {file1 ? file1.name : 'Choose File'}
+                </label>
+              </div>
+              {file1 && <span className="file-name">✓ {file1.name}</span>}
             </label>
           ) : (
             <>
               <label className="file-upload-label">
                 <span>File 1</span>
-                <input type="file" accept={ALLOWED_EXT.join(',')} onChange={(e) => setFile1(e.target.files?.[0] || null)} />
-                {file1 && <span className="file-name">{file1.name}</span>}
+                <div className="file-input-wrapper">
+                  <input
+                    type="file"
+                    id="file-upload-1"
+                    accept={ALLOWED_EXT.join(',')}
+                    onChange={(e) => setFile1(e.target.files?.[0] || null)}
+                  />
+                  <label htmlFor="file-upload-1" className="file-upload-button">
+                    <FiUpload size={18} />
+                    {file1 ? file1.name : 'Choose File'}
+                  </label>
+                </div>
+                {file1 && <span className="file-name">✓ {file1.name}</span>}
               </label>
               <label className="file-upload-label">
                 <span>File 2</span>
-                <input type="file" accept={ALLOWED_EXT.join(',')} onChange={(e) => setFile2(e.target.files?.[0] || null)} />
-                {file2 && <span className="file-name">{file2.name}</span>}
+                <div className="file-input-wrapper">
+                  <input
+                    type="file"
+                    id="file-upload-2"
+                    accept={ALLOWED_EXT.join(',')}
+                    onChange={(e) => setFile2(e.target.files?.[0] || null)}
+                  />
+                  <label htmlFor="file-upload-2" className="file-upload-button">
+                    <FiUpload size={18} />
+                    {file2 ? file2.name : 'Choose File'}
+                  </label>
+                </div>
+                {file2 && <span className="file-name">✓ {file2.name}</span>}
               </label>
             </>
           )}

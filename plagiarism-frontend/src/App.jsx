@@ -8,6 +8,7 @@ import Dashboard from './pages/Dashboard'
 import Report from './pages/Report'
 import Results from './pages/Results'
 import History from './pages/History'
+import About from './pages/About'
 
 export default function App() {
   return (
@@ -15,6 +16,7 @@ export default function App() {
       <Route path="/" element={<Layout title=""> <Home /> </Layout>} />
       <Route path="/login" element={<Layout title=""> <Login /> </Layout>} />
       <Route path="/register" element={<Layout title=""> <Register /> </Layout>} />
+      <Route path="/about" element={<Layout title=""> <About /> </Layout>} />
       <Route
         path="/dashboard"
         element={
@@ -57,5 +59,6 @@ export default function App() {
       />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
+    
   )
 }

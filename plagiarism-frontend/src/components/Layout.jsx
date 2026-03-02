@@ -37,6 +37,7 @@ export default function Layout({ children, title = 'Plagiarism Process' }) {
         </button>
         <nav className={`nav ${menuOpen ? 'open' : ''}`}>
           <Link to="/" onClick={() => setMenuOpen(false)}>Home</Link>
+          <Link to="/about" onClick={() => setMenuOpen(false)}>About</Link>
           {user && (
             <>
               <Link to="/report" onClick={() => setMenuOpen(false)}>Report</Link>
