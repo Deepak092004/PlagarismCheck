@@ -81,14 +81,14 @@ export default function Dashboard() {
         <motion.div className="stat-card" variants={fadeIn} whileHover={{ y: -2 }}>
           <span className="stat-icon"><FiClipboard size={24} /></span>
           <span className="stat-value">{total_checks}</span>
-          <span className="stat-label">Recent Reports</span>
+          <span className="stat-label">Recent Report</span>
         </motion.div>
       </div>
 
       <motion.div className="card recent-reports" variants={fadeIn}>
         <h3>Recent Reports</h3>
         {recent.length === 0 ? (
-          <p className="muted">No reports yet. Run a plagiarism check from Report.</p>
+          <p className="muted">No reports yet. Run a plagiarism check from the Report.</p>
         ) : (
           <ul className="report-list">
             {recent.map((r, i) => (
